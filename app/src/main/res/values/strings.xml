@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">DocScanner</string>
+
+    <!-- Home -->
+    <string name="scan">Scan</string>
+    <string name="no_documents_yet">No documents yet. Tap Scan to create your first one.</string>
+
+    <!-- Permissions -->
+    <string name="camera_permission_rationale">Camera access is required to scan documents.</string>
+    <string name="camera_permission_permanently_denied">Camera permission was denied. Please enable it from Settings to continue scanning.</string>
+    <string name="grant_permission">Grant Permission</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Camera -->
+    <string name="import_from_gallery">Import from Gallery</string>
+
+    <!-- Confirm -->
+    <string name="captured_page">Captured page</string>
+    <string name="retake">Retake</string>
+    <string name="save">Save</string>
+</resources>
