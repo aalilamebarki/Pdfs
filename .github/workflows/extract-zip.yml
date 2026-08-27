@@ -15,11 +15,11 @@ jobs:
 
       - name: Unzip, Move to Root, and Remove Archive
         run: |
-          # استخراج الملفات إلى مجلد مؤقت
-          unzip DocScanner_Phase2-1.zip -d temp_extract
+          # استخراج الملفات إلى مجلد مؤقت (تم تصحيح اسم الملف هنا)
+          unzip DocScanner_Phase2.zip -d temp_extract
           
           # حذف الملف المضغوط
-          rm DocScanner_Phase2-1.zip
+          rm DocScanner_Phase2.zip
           
           # حذف أي مجلد .github موجود داخل الملف المضغوط لتفادي خطأ الصلاحيات عند الرفع
           find temp_extract -type d -name ".github" -exec rm -rf {} +
@@ -50,7 +50,7 @@ jobs:
           
           # إضافة الملفات وتأكيد التغييرات
           git add .
-          git commit -m "Extract files, remove internal .github to fix permissions, and delete archive"
+          git commit -m "Extract DocScanner_Phase2.zip, remove internal .github, and delete archive"
           
           # الرفع إلى المستودع
           git push
