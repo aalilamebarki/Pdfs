@@ -1,0 +1,56 @@
+name: Extract ZIP and Cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unzip-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Unzip, Move to Root, and Remove Archive
+        run: |
+          # استخراج الملفات إلى مجلد مؤقت
+          unzip DocScanner_Phase2-1.zip -d temp_extract
+          
+          # حذف الملف المضغوط
+          rm DocScanner_Phase2-1.zip
+          
+          # حذف أي مجلد .github موجود داخل الملف المضغوط لتفادي خطأ الصلاحيات عند الرفع
+          find temp_extract -type d -name ".github" -exec rm -rf {} +
+          
+          # تفعيل خيار نقل الملفات المخفية
+          shopt -s dotglob
+          
+          # التحقق مما إذا كان الملف المضغوط يحتوي على مجلد رئيسي واحد
+          ITEMS=(temp_extract/*)
+          
+          # استخدام rsync لدمج الملفات والمجلدات
+          if [ ${#ITEMS[@]} -eq 1 ] && [ -d "${ITEMS[0]}" ]; then
+            echo "تم العثور على مجلد رئيسي، يتم الآن دمج محتوياته مع الروت..."
+            rsync -a "${ITEMS[0]}"/ ./
+          else
+            echo "يتم الآن دمج الملفات المتعددة مع الروت مباشرة..."
+            rsync -a temp_extract/ ./
+          fi
+          
+          # مسح المجلد المؤقت
+          rm -rf temp_extract
+
+      - name: Commit and Push changes
+        run: |
+          # إعداد بيانات البوت الخاص بـ GitHub لرفع التعديلات
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # إضافة الملفات وتأكيد التغييرات
+          git add .
+          git commit -m "Extract files, remove internal .github to fix permissions, and delete archive"
+          
+          # الرفع إلى المستودع
+          git push
