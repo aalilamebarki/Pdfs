@@ -32,20 +32,18 @@ jobs:
 
           mkdir -p temp_extract
 
-          echo "Extracting ZIP..."
           unzip -q "$ZIP_FILE" -d temp_extract
 
-          echo "Extracted files:"
-          find temp_extract -maxdepth 3 -type f | head -100
+          echo "ZIP extracted successfully."
 
-      - name: Prepare repository root
+      - name: Replace project files
         shell: bash
         run: |
           set -e
 
           ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
-          echo "Cleaning old project files..."
+          echo "Cleaning project files..."
 
           find . -mindepth 1 -maxdepth 1 \
             ! -name ".git" \
@@ -53,36 +51,51 @@ jobs:
             ! -name "temp_extract" \
             -exec rm -rf {} +
 
-          echo "Copying extracted project to repository root..."
+          echo "Detecting ZIP structure..."
 
-          # If ZIP contains a single top-level folder,
-          # copy its contents instead of creating another nested folder.
           TOP_LEVEL_DIRS=$(find temp_extract -mindepth 1 -maxdepth 1 -type d | wc -l)
           TOP_LEVEL_FILES=$(find temp_extract -mindepth 1 -maxdepth 1 -type f | wc -l)
 
           if [ "$TOP_LEVEL_DIRS" -eq 1 ] && [ "$TOP_LEVEL_FILES" -eq 0 ]; then
+
             ROOT_DIR=$(find temp_extract -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
-            echo "ZIP contains one root folder:"
+            echo "ZIP contains one root directory:"
             echo "$ROOT_DIR"
 
             cp -a "$ROOT_DIR"/. .
 
           else
-            echo "ZIP files are already at root level."
+
+            echo "ZIP contents are at root level."
 
             cp -a temp_extract/. .
+
           fi
 
-          echo "Removing temporary files..."
+          echo "Removing ZIP and temporary files..."
 
           rm -rf temp_extract
           rm -f "$ZIP_FILE"
 
+      - name: Protect GitHub workflows
+        shell: bash
+        run: |
+          set -e
+
+          echo "Restoring existing GitHub workflow files..."
+
+          git restore --source=HEAD -- .github/ || true
+
+          echo "GitHub workflows protected."
+
+      - name: Show final structure
+        shell: bash
+        run: |
           echo "Final repository structure:"
-          find . -maxdepth 2 -type f \
+          find . -maxdepth 3 -type f \
             ! -path "./.git/*" \
-            | sort | head -200
+            | sort | head -300
 
       - name: Commit and Push changes
         shell: bash
@@ -101,4 +114,4 @@ jobs:
 
           git commit -m "Extract Android project from ZIP"
 
-          git push
+          git push origin HEAD:main
