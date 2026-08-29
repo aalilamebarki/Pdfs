@@ -1,4 +1,4 @@
-package com.ali.docscanner.presentation.home
+package com.ali.docscanner.presentation.documentslist
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -6,21 +6,21 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -32,6 +32,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ali.docscanner.R
@@ -42,72 +44,37 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(
-    onScanClick: () -> Unit,
-    onSeeAllClick: () -> Unit,
+fun DocumentsListScreen(
     onDocumentClick: (Long) -> Unit,
-    viewModel: HomeViewModel = hiltViewModel()
+    viewModel: DocumentsListViewModel = hiltViewModel()
 ) {
-    val recentDocuments by viewModel.recentDocuments.collectAsState()
+    val documents by viewModel.documents.collectAsState()
 
     Scaffold(
-        topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.app_name)) })
-        }
+        topBar = { TopAppBar(title = { Text(stringResource(R.string.documents_list_title)) }) }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp)
-        ) {
-            Button(
-                onClick = onScanClick,
-                modifier = Modifier.fillMaxWidth().height(56.dp)
+        if (documents.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = stringResource(R.string.scan),
-                    style = MaterialTheme.typography.titleMedium
+                    text = stringResource(R.string.no_documents_yet),
+                    style = MaterialTheme.typography.bodyLarge
                 )
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = stringResource(R.string.recent_documents),
-                    style = MaterialTheme.typography.titleMedium
-                )
-                if (recentDocuments.isNotEmpty()) {
-                    TextButton(onClick = onSeeAllClick) {
-                        Text(stringResource(R.string.see_all))
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (recentDocuments.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = stringResource(R.string.no_documents_yet),
-                        style = MaterialTheme.typography.bodyLarge
+                items(documents, key = { it.id }) { document ->
+                    DocumentRow(
+                        document = document,
+                        onClick = { onDocumentClick(document.id) },
+                        onDelete = { viewModel.deleteDocument(document) }
                     )
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    recentDocuments.forEach { document ->
-                        RecentDocumentRow(
-                            document = document,
-                            onClick = { onDocumentClick(document.id) }
-                        )
-                    }
                 }
             }
         }
@@ -115,31 +82,40 @@ fun HomeScreen(
 }
 
 @Composable
-private fun RecentDocumentRow(document: Document, onClick: () -> Unit) {
+private fun DocumentRow(document: Document, onClick: () -> Unit, onDelete: () -> Unit) {
+    val deleteLabel = stringResource(R.string.delete_document)
+
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            RecentThumbnail(path = document.thumbnailPath)
+            DocumentThumbnail(path = document.thumbnailPath)
 
-            Column(modifier = Modifier.padding(start = 12.dp)) {
-                Text(text = document.name, style = MaterialTheme.typography.titleSmall)
+            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+                Text(text = document.name, style = MaterialTheme.typography.titleMedium)
                 Text(
                     text = stringResource(
                         R.string.document_meta_label,
                         document.pageCount,
-                        SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(document.updatedAt))
+                        formatDate(document.updatedAt)
                     ),
                     style = MaterialTheme.typography.bodySmall
                 )
+            }
+
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.semantics { contentDescription = deleteLabel }
+            ) {
+                Text(text = "\u2715", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.error)
             }
         }
     }
 }
 
 @Composable
-private fun RecentThumbnail(path: String?) {
+private fun DocumentThumbnail(path: String?) {
     val bitmapState = produceState<android.graphics.Bitmap?>(initialValue = null, path) {
         value = if (path != null) {
             try {
@@ -153,7 +129,9 @@ private fun RecentThumbnail(path: String?) {
     }
 
     Box(
-        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp))
+        modifier = Modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(6.dp))
     ) {
         val bitmap = bitmapState.value
         if (bitmap != null) {
@@ -165,4 +143,9 @@ private fun RecentThumbnail(path: String?) {
             )
         }
     }
+}
+
+private fun formatDate(timestampMillis: Long): String {
+    val formatter = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+    return formatter.format(Date(timestampMillis))
 }

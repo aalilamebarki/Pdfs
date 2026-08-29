@@ -3,6 +3,7 @@ package com.ali.docscanner.presentation.camera
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -25,12 +26,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,6 +45,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -59,7 +62,7 @@ private const val TAG = "CameraScreen"
 
 @Composable
 fun CameraScreen(
-    onImageReady: (String) -> Unit,
+    onImageReady: (String, Long) -> Unit,
     onClose: () -> Unit,
     viewModel: CameraViewModel = hiltViewModel()
 ) {
@@ -69,8 +72,16 @@ fun CameraScreen(
     LaunchedEffect(uiState) {
         val state = uiState
         if (state is CameraUiState.Captured) {
-            onImageReady(state.filePath)
+            onImageReady(state.filePath, viewModel.documentId)
         }
+    }
+
+    // FIX (audit): system/gesture back previously bypassed cleanup entirely — Jetpack
+    // Navigation's default back handling just pops the stack without calling onClose,
+    // so a captured-but-unconfirmed temp file was silently orphaned in cacheDir.
+    BackHandler {
+        viewModel.cancelAndCleanUp()
+        onClose()
     }
 
     when (permissionState.status) {
@@ -163,15 +174,36 @@ private fun CameraLiveContent(
     val imageCapture = remember { ImageCapture.Builder().build() }
     val previewView = remember { PreviewView(context) }
 
-    LaunchedEffect(isFlashOn, isFrontCamera) {
-        bindCameraUseCases(
-            context = context,
-            lifecycleOwner = lifecycleOwner,
-            previewView = previewView,
-            imageCapture = imageCapture,
-            isFrontCamera = isFrontCamera,
-            isFlashOn = isFlashOn
-        )
+    val closeLabel = stringResource(R.string.close_camera)
+    val flashLabel = stringResource(R.string.toggle_flash)
+    val switchCameraLabel = stringResource(R.string.switch_camera)
+    val cameraUnavailableMessage = stringResource(R.string.error_camera_unavailable)
+
+    DisposableEffect(isFlashOn, isFrontCamera) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            bindCameraUseCases(
+                cameraProviderFuture = cameraProviderFuture,
+                lifecycleOwner = lifecycleOwner,
+                previewView = previewView,
+                imageCapture = imageCapture,
+                isFrontCamera = isFrontCamera,
+                isFlashOn = isFlashOn,
+                onError = { viewModel.onCaptureError(cameraUnavailableMessage) }
+            )
+        }, ContextCompat.getMainExecutor(context))
+
+        onDispose {
+            // Explicitly release the camera — binding was scoped to the Activity's
+            // lifecycle (LocalLifecycleOwner in a single-Activity Nav app), which does
+            // NOT reach DESTROYED just because the user navigated to another screen.
+            // Without this, the camera stayed open/locked after leaving CameraScreen.
+            try {
+                cameraProviderFuture.get().unbindAll()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to unbind camera on dispose", e)
+            }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -184,7 +216,10 @@ private fun CameraLiveContent(
 
         TextButton(
             onClick = onClose,
-            modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+                .semantics { contentDescription = closeLabel }
         ) {
             Text(text = "\u2715", color = Color.White, style = MaterialTheme.typography.headlineSmall)
         }
@@ -201,7 +236,10 @@ private fun CameraLiveContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = { viewModel.toggleFlash() }) {
+                TextButton(
+                    onClick = { viewModel.toggleFlash() },
+                    modifier = Modifier.semantics { contentDescription = flashLabel }
+                ) {
                     Text(
                         text = if (isFlashOn) "\u26A1 ON" else "\u26A1 OFF",
                         color = Color.White
@@ -210,6 +248,7 @@ private fun CameraLiveContent(
 
                 CaptureButton(
                     enabled = uiState !is CameraUiState.Error,
+                    contentDescription = stringResource(R.string.scan),
                     onClick = {
                         captureImage(
                             context = context,
@@ -219,7 +258,10 @@ private fun CameraLiveContent(
                     }
                 )
 
-                TextButton(onClick = { viewModel.toggleLensFacing() }) {
+                TextButton(
+                    onClick = { viewModel.toggleLensFacing() },
+                    modifier = Modifier.semantics { contentDescription = switchCameraLabel }
+                ) {
                     Text(text = "\u21BB", color = Color.White, style = MaterialTheme.typography.headlineSmall)
                 }
             }
@@ -250,9 +292,11 @@ private fun CameraLiveContent(
 }
 
 @Composable
-private fun CaptureButton(enabled: Boolean, onClick: () -> Unit) {
+private fun CaptureButton(enabled: Boolean, contentDescription: String, onClick: () -> Unit) {
     Surface(
-        modifier = Modifier.size(72.dp),
+        modifier = Modifier
+            .size(72.dp)
+            .semantics { this.contentDescription = contentDescription },
         shape = CircleShape,
         color = if (enabled) Color.White else Color.Gray,
         border = BorderStroke(4.dp, Color.LightGray),
@@ -316,7 +360,7 @@ private fun captureImage(
 
             override fun onError(exception: ImageCaptureException) {
                 Log.e(TAG, "Capture failed", exception)
-                viewModel.onCaptureError(exception.message ?: "Capture failed")
+                viewModel.onCaptureError(exception.message ?: context.getString(R.string.error_capture_failed))
             }
         }
     )
@@ -337,20 +381,20 @@ private fun importFromGallery(
         viewModel.onGalleryImageImported(tempFile)
     } catch (e: Exception) {
         Log.e(TAG, "Gallery import failed", e)
-        viewModel.onCaptureError(e.message ?: "Failed to import image")
+        viewModel.onCaptureError(e.message ?: context.getString(R.string.error_importing_image))
     }
 }
 
 private fun bindCameraUseCases(
-    context: Context,
+    cameraProviderFuture: com.google.common.util.concurrent.ListenableFuture<ProcessCameraProvider>,
     lifecycleOwner: LifecycleOwner,
     previewView: PreviewView,
     imageCapture: ImageCapture,
     isFrontCamera: Boolean,
-    isFlashOn: Boolean
+    isFlashOn: Boolean,
+    onError: () -> Unit
 ) {
-    val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-    cameraProviderFuture.addListener({
+    try {
         val cameraProvider = cameraProviderFuture.get()
 
         val preview = Preview.Builder().build().also {
@@ -369,16 +413,21 @@ private fun bindCameraUseCases(
             CameraSelector.DEFAULT_BACK_CAMERA
         }
 
-        try {
-            cameraProvider.unbindAll()
-            cameraProvider.bindToLifecycle(
-                lifecycleOwner,
-                cameraSelector,
-                preview,
-                imageCapture
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Camera binding failed", e)
+        if (!cameraProvider.hasCamera(cameraSelector)) {
+            Log.e(TAG, "Requested camera (front=$isFrontCamera) is not available on this device")
+            onError()
+            return
         }
-    }, ContextCompat.getMainExecutor(context))
+
+        cameraProvider.unbindAll()
+        cameraProvider.bindToLifecycle(
+            lifecycleOwner,
+            cameraSelector,
+            preview,
+            imageCapture
+        )
+    } catch (e: Exception) {
+        Log.e(TAG, "Camera binding failed", e)
+        onError()
+    }
 }

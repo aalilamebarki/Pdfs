@@ -1,13 +1,17 @@
 package com.ali.docscanner.presentation.camera
 
 import android.content.Context
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.ali.docscanner.util.ImageFileManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
@@ -19,8 +23,12 @@ sealed interface CameraUiState {
 
 @HiltViewModel
 class CameraViewModel @Inject constructor(
-    @ApplicationContext private val appContext: Context
+    @ApplicationContext private val appContext: Context,
+    savedStateHandle: SavedStateHandle
 ) : ViewModel() {
+
+    /** 0L means "no document yet — this capture will start a new one". */
+    val documentId: Long = (savedStateHandle.get<String>("documentId") ?: "0").toLong()
 
     private val _uiState = MutableStateFlow<CameraUiState>(CameraUiState.Preview)
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
@@ -64,10 +72,13 @@ class CameraViewModel @Inject constructor(
 
     /** User cancels out of the camera screen entirely (before confirming a page). */
     fun cancelAndCleanUp() {
-        pendingTempFile?.let { ImageFileManager.deleteFile(it) }
+        val fileToDelete = pendingTempFile
         pendingTempFile = null
-        ImageFileManager.clearTempCache(appContext)
         _uiState.value = CameraUiState.Preview
+        viewModelScope.launch(Dispatchers.IO) {
+            fileToDelete?.let { ImageFileManager.deleteFile(it) }
+            ImageFileManager.clearTempCache(appContext)
+        }
     }
 
     override fun onCleared() {
