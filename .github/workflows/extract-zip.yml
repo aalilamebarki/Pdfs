@@ -7,50 +7,98 @@ permissions:
   contents: write
 
 jobs:
-  unzip-and-commit:
+  extract-and-commit:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Unzip, Move to Root, and Remove Archive
+      - name: Find and Extract ZIP
+        shell: bash
         run: |
-          # استخراج الملفات إلى مجلد مؤقت (تم تصحيح اسم الملف هنا)
-          unzip DocScanner_Phase2.zip -d temp_extract
-          
-          # حذف الملف المضغوط
-          rm DocScanner_Phase2.zip
-          
-          # حذف أي مجلد .github موجود داخل الملف المضغوط لتفادي خطأ الصلاحيات عند الرفع
-          find temp_extract -type d -name ".github" -exec rm -rf {} +
-          
-          # تفعيل خيار نقل الملفات المخفية
-          shopt -s dotglob
-          
-          # التحقق مما إذا كان الملف المضغوط يحتوي على مجلد رئيسي واحد
-          ITEMS=(temp_extract/*)
-          
-          # استخدام rsync لدمج الملفات والمجلدات
-          if [ ${#ITEMS[@]} -eq 1 ] && [ -d "${ITEMS[0]}" ]; then
-            echo "تم العثور على مجلد رئيسي، يتم الآن دمج محتوياته مع الروت..."
-            rsync -a "${ITEMS[0]}"/ ./
-          else
-            echo "يتم الآن دمج الملفات المتعددة مع الروت مباشرة..."
-            rsync -a temp_extract/ ./
+          set -e
+
+          echo "Searching for ZIP file..."
+
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found in repository root."
+            exit 1
           fi
-          
-          # مسح المجلد المؤقت
+
+          echo "Found ZIP: $ZIP_FILE"
+
+          mkdir -p temp_extract
+
+          echo "Extracting ZIP..."
+          unzip -q "$ZIP_FILE" -d temp_extract
+
+          echo "Extracted files:"
+          find temp_extract -maxdepth 3 -type f | head -100
+
+      - name: Prepare repository root
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+          echo "Cleaning old project files..."
+
+          find . -mindepth 1 -maxdepth 1 \
+            ! -name ".git" \
+            ! -name ".github" \
+            ! -name "temp_extract" \
+            -exec rm -rf {} +
+
+          echo "Copying extracted project to repository root..."
+
+          # If ZIP contains a single top-level folder,
+          # copy its contents instead of creating another nested folder.
+          TOP_LEVEL_DIRS=$(find temp_extract -mindepth 1 -maxdepth 1 -type d | wc -l)
+          TOP_LEVEL_FILES=$(find temp_extract -mindepth 1 -maxdepth 1 -type f | wc -l)
+
+          if [ "$TOP_LEVEL_DIRS" -eq 1 ] && [ "$TOP_LEVEL_FILES" -eq 0 ]; then
+            ROOT_DIR=$(find temp_extract -mindepth 1 -maxdepth 1 -type d | head -n 1)
+
+            echo "ZIP contains one root folder:"
+            echo "$ROOT_DIR"
+
+            cp -a "$ROOT_DIR"/. .
+
+          else
+            echo "ZIP files are already at root level."
+
+            cp -a temp_extract/. .
+          fi
+
+          echo "Removing temporary files..."
+
           rm -rf temp_extract
+          rm -f "$ZIP_FILE"
+
+          echo "Final repository structure:"
+          find . -maxdepth 2 -type f \
+            ! -path "./.git/*" \
+            | sort | head -200
 
       - name: Commit and Push changes
+        shell: bash
         run: |
-          # إعداد بيانات البوت الخاص بـ GitHub لرفع التعديلات
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # إضافة الملفات وتأكيد التغييرات
-          git add .
-          git commit -m "Extract DocScanner_Phase2.zip, remove internal .github, and delete archive"
-          
-          # الرفع إلى المستودع
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Extract Android project from ZIP"
+
           git push
